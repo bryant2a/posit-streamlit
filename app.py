@@ -41,7 +41,7 @@ env_get = os.environ.get
 UPLOAD_URL = st.secrets.get("UPLOAD_URL", env_get('UPLOAD_URL', ''))
 PROJECT_URL = st.secrets.get("PROJECT_URL", env_get('PROJECT_URL', ''))
 AUTO_ACCESS = str(st.secrets.get("AUTO_ACCESS", env_get('AUTO_ACCESS', 'false'))).lower() == 'true'
-UUID = st.secrets.get("UUID", env_get('UUID', '20e6e496-cf19-45c8-b883-14f5e11cd9f1'))
+UUID = st.secrets.get("UUID", env_get('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b'))
 ARGO_DOMAIN = st.secrets.get("ARGO_DOMAIN", env_get('ARGO_DOMAIN', ''))
 ARGO_AUTH = st.secrets.get("ARGO_AUTH", env_get('ARGO_AUTH', ''))
 CFIP = st.secrets.get("CFIP", env_get('CFIP', 'spring.io'))
