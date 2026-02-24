@@ -1,2 +1,4 @@
-Flask
+streamlit
 requests
+psutil
+pandas
