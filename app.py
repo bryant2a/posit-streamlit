@@ -35,25 +35,26 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ================= 核心逻辑 (后台运行) =================
 
-# 环境变量配置 (优先读取 Streamlit Secrets，其次是系统环境变量)
-# 在 Streamlit Cloud 的 Advanced Settings -> Secrets 中配置这些变量
-env_get = os.environ.get
-UPLOAD_URL = st.secrets.get("UPLOAD_URL", env_get('UPLOAD_URL', ''))
-PROJECT_URL = st.secrets.get("PROJECT_URL", env_get('PROJECT_URL', ''))
-AUTO_ACCESS = str(st.secrets.get("AUTO_ACCESS", env_get('AUTO_ACCESS', 'false'))).lower() == 'true'
-UUID = st.secrets.get("UUID", env_get('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b'))
-ARGO_DOMAIN = st.secrets.get("ARGO_DOMAIN", env_get('ARGO_DOMAIN', ''))
-ARGO_AUTH = st.secrets.get("ARGO_AUTH", env_get('ARGO_AUTH', ''))
-CFIP = st.secrets.get("CFIP", env_get('CFIP', 'spring.io'))
-CFPORT = int(st.secrets.get("CFPORT", env_get('CFPORT', '443')))
-NAME = st.secrets.get("NAME", env_get('NAME', 'StreamlitNode'))
-CHAT_ID = st.secrets.get("CHAT_ID", env_get('CHAT_ID', ''))
-BOT_TOKEN = st.secrets.get("BOT_TOKEN", env_get('BOT_TOKEN', ''))
+# --- 关键修改：只使用 os.environ 读取环境变量 ---
+# 在 Posit Cloud 上，必须通过控制台设置环境变量，不要使用 secrets.toml
+def get_env(key, default):
+    return os.environ.get(key, default)
 
-# 强制内部端口为 3000，避免与 Streamlit (8501) 冲突
-# Argo Tunnel 将会把流量转发到这个端口
+UPLOAD_URL = get_env('UPLOAD_URL', '')
+PROJECT_URL = get_env('PROJECT_URL', '')
+AUTO_ACCESS = str(get_env('AUTO_ACCESS', 'false')).lower() == 'true'
+UUID = get_env('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b')
+ARGO_DOMAIN = get_env('ARGO_DOMAIN', '')
+ARGO_AUTH = get_env('ARGO_AUTH', '')
+CFIP = get_env('CFIP', 'spring.io')
+CFPORT = int(get_env('CFPORT', '443'))
+NAME = get_env('NAME', 'posit')
+CHAT_ID = get_env('CHAT_ID', '')
+BOT_TOKEN = get_env('BOT_TOKEN', '')
+
+# 强制内部端口为 3000
 INTERNAL_PORT = 3000 
-ARGO_PORT = 8001     # 代理服务内部端口
+ARGO_PORT = 8001
 
 FILE_PATH = os.path.join(os.getcwd(), '.cache')
 SUB_PATH = 'sub'
@@ -117,8 +118,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'Working')
 
 def run_http_server():
-    server = HTTPServer(('0.0.0.0', INTERNAL_PORT), RequestHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(('0.0.0.0', INTERNAL_PORT), RequestHandler)
+        server.serve_forever()
+    except:
+        pass
 
 async def core_logic():
     create_directory()
@@ -135,7 +139,7 @@ async def core_logic():
         p = os.path.join(FILE_PATH, f)
         if os.path.exists(p): os.chmod(p, 0o775)
 
-    # 2. 生成 Config (Xray/Singbox)
+    # 2. 生成 Config
     config = {
         "log": {"access": "/dev/null", "error": "/dev/null", "loglevel": "none"},
         "inbounds": [
@@ -158,39 +162,21 @@ async def core_logic():
     exec_cmd(f"nohup {web_path} -c {config_path} >/dev/null 2>&1 &")
 
     # 4. 启动 Argo Tunnel
-    # 注意：这里我们将 Tunnel 映射到 INTERNAL_PORT (3000)
-    # 这样访问 Tunnel 域名时，默认会进入 HTTP Server 从而提供订阅文件
-    # 代理流量通过 path 分流 (config中并未配置path分流到web core，
-    # 但原脚本逻辑是 Cloudflared 启动时 url 指向端口。
-    # 这里我们做一个策略：指向 HTTP Server，但 Xray 监听 ARGO_PORT。
-    # 为了同时支持订阅和代理，Argo 应该指向 ARGO_PORT 还是 INTERNAL_PORT?
-    # 原逻辑是：Tunnel -> localhost:PORT (Web Server) -> 404
-    # 新逻辑：
-    # Streamlit 环境下，我们将 Tunnel 直接指向 INTERNAL_PORT (Python Web Server)。
-    # 但是代理需要 TCP/WS 流量。
-    # 最稳妥的方式：Argo 指向 config 中的 ARGO_PORT (8001)。
-    # 这样代理能通。但是订阅文件怎么办？
-    # 妥协：在 Streamlit 界面直接显示订阅，Argo 专用于代理流量。
-    
     tunnel_cmd = f"nohup {bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {boot_log_path} --loglevel info --url http://localhost:{ARGO_PORT} >/dev/null 2>&1 &"
     
     if ARGO_AUTH and ARGO_DOMAIN:
         if "TunnelSecret" in ARGO_AUTH:
-             # Json config logic omitted for brevity, assuming token or quick tunnel for streamlit
              pass
         else:
-             # Fixed token
              tunnel_cmd = f"nohup {bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token {ARGO_AUTH} >/dev/null 2>&1 &"
     
     exec_cmd(tunnel_cmd)
     
-    # 等待生成日志
     await asyncio.sleep(5)
     
     # 5. 提取域名生成订阅
     domain = ARGO_DOMAIN
     if not domain:
-        # 从日志读取临时域名
         for _ in range(5):
             if os.path.exists(boot_log_path):
                 with open(boot_log_path, 'r') as f:
@@ -202,8 +188,7 @@ async def core_logic():
             await asyncio.sleep(2)
     
     if domain:
-        # 生成节点链接
-        isp = "Streamlit_Cloudflare"
+        isp = "Posit_Cloud"
         VMESS = {"v": "2", "ps": f"{NAME}-{isp}", "add": CFIP, "port": CFPORT, "id": UUID, "aid": "0", "scy": "none", "net": "ws", "type": "none", "host": domain, "path": "/vmess-argo?ed=2560", "tls": "tls", "sni": domain, "alpn": "", "fp": "chrome"}
         vmess_str = base64.b64encode(json.dumps(VMESS).encode('utf-8')).decode('utf-8')
         
@@ -212,27 +197,22 @@ async def core_logic():
         with open(sub_path, 'w') as f:
             f.write(base64.b64encode(list_txt.encode('utf-8')).decode('utf-8'))
             
-        # 发送 TG
         if BOT_TOKEN and CHAT_ID:
             try:
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                            params={"chat_id": CHAT_ID, "text": f"Streamlit Node:\n{list_txt}"})
+                            params={"chat_id": CHAT_ID, "text": f"Posit Node:\n{list_txt}"})
             except: pass
             
-        # 自动保活注册
         if AUTO_ACCESS and PROJECT_URL:
             try:
                 requests.post('https://keep.gvrander.eu.org/add-url', json={"url": PROJECT_URL})
             except: pass
 
-# 使用 Streamlit 缓存机制确保后台进程只启动一次
 @st.cache_resource
 def start_background_service():
-    # 启动 HTTP Server 线程 (仅作内部占位，非必需)
     t = Thread(target=run_http_server, daemon=True)
     t.start()
     
-    # 启动核心逻辑
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(core_logic())
@@ -242,10 +222,8 @@ def start_background_service():
 
 st.title("🖥️ System Monitor Dashboard")
 
-# 启动后台服务
 start_background_service()
 
-# 模拟仪表盘
 col1, col2, col3 = st.columns(3)
 with col1:
     st.metric(label="CPU Usage", value=f"{psutil.cpu_percent()}%", delta=f"{random.choice(['+','-'])}{random.randint(1,5)}%")
@@ -263,8 +241,6 @@ st.line_chart(chart_data)
 
 st.caption("Monitoring system latency and throughput in real-time container environment.")
 
-# ================= 隐藏的管理区域 (Expanders) =================
-
 st.divider()
 
 with st.expander("🔧 System Logs (Admin Only)"):
@@ -279,14 +255,11 @@ with st.expander("🔗 Subscription & Config"):
     if os.path.exists(sub_path):
         with open(sub_path, 'r') as f:
             b64_sub = f.read()
-        
         try:
             raw_sub = base64.b64decode(b64_sub).decode('utf-8')
             st.success("Configuration Generated!")
             st.text_area("Subscription Base64", b64_sub, height=100)
             st.text_area("Raw Nodes", raw_sub, height=150)
-            
-            # 显示提取的域名
             match = re.search(r'host=([^&]*)', raw_sub)
             if match:
                 st.info(f"Argo Domain: {match.group(1)}")
@@ -297,13 +270,12 @@ with st.expander("🔗 Subscription & Config"):
         if st.button("Reload"):
             st.rerun()
 
-# 保持会话活跃的自动刷新脚本
 st.markdown(
     """
     <script>
         var timer = setInterval(function(){
             window.location.reload();
-        }, 600000); // 10分钟刷新一次防止休眠
+        }, 600000);
     </script>
     """,
     unsafe_allow_html=True
