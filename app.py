@@ -55,7 +55,7 @@ BOT_TOKEN = get_env('BOT_TOKEN', '')
 
 # 端口配置
 INTERNAL_PORT = 3000 
-ARGO_PORT = 8080
+ARGO_PORT = 8001
 
 # 路径配置
 FILE_PATH = os.path.join(os.getcwd(), '.cache')
