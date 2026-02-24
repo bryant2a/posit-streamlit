@@ -16,128 +16,79 @@ import psutil
 import pandas as pd
 import random
 
-# ================= Streamlit 页面配置 (伪装部分) =================
+# ================= 页面配置 (伪装) =================
 st.set_page_config(
-    page_title="Server Performance Monitor",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Server Status",
+    page_icon="📈",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# 隐藏 Streamlit 默认菜单和页脚
-hide_streamlit_style = """
+# 隐藏所有 Streamlit 元素
+hide_style = """
 <style>
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
+header {visibility: hidden;}
 </style>
 """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown(hide_style, unsafe_allow_html=True)
 
-# ================= 核心逻辑 (后台运行) =================
-
-# --- 关键修改：只使用 os.environ 读取环境变量 ---
-# 在 Posit Cloud 上，必须通过控制台设置环境变量，不要使用 secrets.toml
+# ================= 环境变量获取 (兼容 Posit) =================
+# Posit Connect 必须通过 os.environ 读取 Vars，不支持 st.secrets
 def get_env(key, default):
     return os.environ.get(key, default)
 
+# 必填项：UUID
+UUID = get_env('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b') 
+# 选填项
 UPLOAD_URL = get_env('UPLOAD_URL', '')
-PROJECT_URL = get_env('PROJECT_URL', 'https://019c8f86-4230-b089-b30b-55d3243a2ea7.share.connect.posit.cloud')
+PROJECT_URL = get_env('PROJECT_URL', 'https://019c8f86-4230-b089-b30b-55d3243a2ea7.share.connect.posit.cloud') # 你的项目访问地址，用于自动唤醒
 AUTO_ACCESS = str(get_env('AUTO_ACCESS', 'false')).lower() == 'true'
-UUID = get_env('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b')
 ARGO_DOMAIN = get_env('ARGO_DOMAIN', 'f.0000.ddns-ip.net')
 ARGO_AUTH = get_env('ARGO_AUTH', 'eyJhIjoiZTcyODcwODc5MzRhYTUzN2MxNzZmYzg3NWNjOGUxZGQiLCJ0IjoiNDk3YThmNGItYTQ4YS00MjZiLWE5MGYtYmMwNjI0YWUyYjE3IiwicyI6Ik5QWFpLbU1TVm1ZSjhmNzBmUjZCKzc2cURDWFZRYjFmdldBMFZyc1VPc1U9In0=')
-CFIP = get_env('CFIP', 'spring.io')
+CFIP = get_env('CFIP', 'cf.008500.xyz') # 优选IP/域名
 CFPORT = int(get_env('CFPORT', '443'))
-NAME = get_env('NAME', 'posit')
+NAME = get_env('NAME', 'Posit')
 CHAT_ID = get_env('CHAT_ID', '')
 BOT_TOKEN = get_env('BOT_TOKEN', '')
 
-# 强制内部端口为 3000
+# 端口配置
 INTERNAL_PORT = 3000 
 ARGO_PORT = 8080
 
+# 路径配置
 FILE_PATH = os.path.join(os.getcwd(), '.cache')
-SUB_PATH = 'sub'
+if not os.path.exists(FILE_PATH):
+    os.makedirs(FILE_PATH)
 
-# 全局路径
 web_path = os.path.join(FILE_PATH, 'web')
 bot_path = os.path.join(FILE_PATH, 'bot')
 sub_path = os.path.join(FILE_PATH, 'sub.txt')
-list_path = os.path.join(FILE_PATH, 'list.txt')
 boot_log_path = os.path.join(FILE_PATH, 'boot.log')
 config_path = os.path.join(FILE_PATH, 'config.json')
 
-# --- 核心功能函数 ---
+# ================= 后台核心逻辑 =================
 
-def create_directory():
-    if not os.path.exists(FILE_PATH):
-        os.makedirs(FILE_PATH)
-
-def get_system_architecture():
-    arch = platform.machine().lower()
-    return 'arm' if 'arm' in arch or 'aarch64' in arch else 'amd'
-
-def download_file(file_name, file_url):
-    file_path = os.path.join(FILE_PATH, file_name)
+def download_resource(filename, url):
+    filepath = os.path.join(FILE_PATH, filename)
+    if os.path.exists(filepath):
+        return
     try:
-        response = requests.get(file_url, stream=True)
-        response.raise_for_status()
-        with open(file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+        r = requests.get(url, stream=True)
+        with open(filepath, 'wb') as f:
+            for chunk in r.iter_content(8192):
                 f.write(chunk)
-        return True
-    except Exception as e:
-        if os.path.exists(file_path): os.remove(file_path)
-        return False
-
-def get_files_for_architecture(architecture):
-    domain = "arm64.ssss.nyc.mn" if architecture == 'arm' else "amd64.ssss.nyc.mn"
-    return [
-        {"fileName": "web", "fileUrl": f"https://{domain}/web"},
-        {"fileName": "bot", "fileUrl": f"https://{domain}/2go"}
-    ]
-
-def exec_cmd(command):
-    subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-class RequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == f'/{SUB_PATH}':
-            try:
-                with open(sub_path, 'rb') as f:
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/plain')
-                    self.end_headers()
-                    self.wfile.write(f.read())
-            except:
-                self.send_response(404)
-                self.end_headers()
-        else:
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Working')
-
-def run_http_server():
-    try:
-        server = HTTPServer(('0.0.0.0', INTERNAL_PORT), RequestHandler)
-        server.serve_forever()
+        os.chmod(filepath, 0o775)
     except:
         pass
 
-async def core_logic():
-    create_directory()
-    
-    # 1. 下载核心
-    arch = get_system_architecture()
-    files = get_files_for_architecture(arch)
-    for f in files:
-        if not os.path.exists(os.path.join(FILE_PATH, f['fileName'])):
-            download_file(f['fileName'], f['fileUrl'])
-    
-    # 授权
-    for f in ['web', 'bot']:
-        p = os.path.join(FILE_PATH, f)
-        if os.path.exists(p): os.chmod(p, 0o775)
+def setup_core():
+    # 1. 识别架构下载文件
+    arch = 'arm' if 'arm' in platform.machine().lower() else 'amd'
+    domain = f"{arch}64.ssss.nyc.mn"
+    download_resource("web", f"https://{domain}/web")
+    download_resource("bot", f"https://{domain}/2go")
 
     # 2. 生成 Config
     config = {
@@ -158,125 +109,148 @@ async def core_logic():
     with open(config_path, 'w') as f:
         json.dump(config, f)
 
-    # 3. 启动 Web Core
-    exec_cmd(f"nohup {web_path} -c {config_path} >/dev/null 2>&1 &")
-
-    # 4. 启动 Argo Tunnel
-    tunnel_cmd = f"nohup {bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {boot_log_path} --loglevel info --url http://localhost:{ARGO_PORT} >/dev/null 2>&1 &"
+async def run_services():
+    setup_core()
     
+    # 启动核心
+    subprocess.Popen(f"{web_path} -c {config_path} >/dev/null 2>&1", shell=True)
+    
+    # 启动 Argo
     if ARGO_AUTH and ARGO_DOMAIN:
-        if "TunnelSecret" in ARGO_AUTH:
-             pass
-        else:
-             tunnel_cmd = f"nohup {bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token {ARGO_AUTH} >/dev/null 2>&1 &"
+         # 固定隧道
+         cmd = f"{bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token {ARGO_AUTH}"
+    else:
+         # 临时隧道
+         cmd = f"{bot_path} tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {boot_log_path} --loglevel info --url http://localhost:{ARGO_PORT}"
     
-    exec_cmd(tunnel_cmd)
+    subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     
+    # 等待并生成订阅
     await asyncio.sleep(5)
-    
-    # 5. 提取域名生成订阅
+    await generate_sub()
+
+async def generate_sub():
     domain = ARGO_DOMAIN
-    if not domain:
-        for _ in range(5):
-            if os.path.exists(boot_log_path):
-                with open(boot_log_path, 'r') as f:
-                    content = f.read()
-                    match = re.search(r'https?://([^ ]*trycloudflare\.com)', content)
-                    if match:
-                        domain = match.group(1)
-                        break
-            await asyncio.sleep(2)
     
-    if domain:
-        isp = "Posit_Cloud"
-        VMESS = {"v": "2", "ps": f"{NAME}-{isp}", "add": CFIP, "port": CFPORT, "id": UUID, "aid": "0", "scy": "none", "net": "ws", "type": "none", "host": domain, "path": "/vmess-argo?ed=2560", "tls": "tls", "sni": domain, "alpn": "", "fp": "chrome"}
-        vmess_str = base64.b64encode(json.dumps(VMESS).encode('utf-8')).decode('utf-8')
-        
-        list_txt = f"vless://{UUID}@{CFIP}:{CFPORT}?encryption=none&security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Fvless-argo%3Fed%3D2560#{NAME}-{isp}\nvmess://{vmess_str}\ntrojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Ftrojan-argo%3Fed%3D2560#{NAME}-{isp}"
-        
-        with open(sub_path, 'w') as f:
-            f.write(base64.b64encode(list_txt.encode('utf-8')).decode('utf-8'))
+    # 如果是临时隧道，从日志抓取域名
+    if not domain:
+        for _ in range(10):
+            if os.path.exists(boot_log_path):
+                try:
+                    with open(boot_log_path, 'r') as f:
+                        log_content = f.read()
+                        match = re.search(r'https?://([^ ]*trycloudflare\.com)', log_content)
+                        if match:
+                            domain = match.group(1)
+                            break
+                except: pass
+            await asyncio.sleep(2)
             
+    if domain:
+        # 生成节点信息
+        isp = "Posit"
+        vmess_json = {"v": "2", "ps": f"{NAME}-{isp}", "add": CFIP, "port": CFPORT, "id": UUID, "aid": "0", "scy": "none", "net": "ws", "type": "none", "host": domain, "path": "/vmess-argo?ed=2560", "tls": "tls", "sni": domain, "alpn": "", "fp": "chrome"}
+        vmess_str = base64.b64encode(json.dumps(vmess_json).encode('utf-8')).decode('utf-8')
+        
+        raw_list = f"vless://{UUID}@{CFIP}:{CFPORT}?encryption=none&security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Fvless-argo%3Fed%3D2560#{NAME}-{isp}\nvmess://{vmess_str}\ntrojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={domain}&fp=chrome&type=ws&host={domain}&path=%2Ftrojan-argo%3Fed%3D2560#{NAME}-{isp}"
+        
+        # 写入文件供读取
+        with open(sub_path, 'w') as f:
+            f.write(raw_list)
+            
+        # 1. 打印到控制台日志 (Posit后台可见)
+        print("-" * 20)
+        print("DOMAIN:", domain)
+        print("NODES GENERATED SUCCESS")
+        print("-" * 20)
+        
+        # 2. TG 推送
         if BOT_TOKEN and CHAT_ID:
             try:
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                            params={"chat_id": CHAT_ID, "text": f"Posit Node:\n{list_txt}"})
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={raw_list}")
             except: pass
             
+        # 3. 自动保活注册
         if AUTO_ACCESS and PROJECT_URL:
             try:
                 requests.post('https://keep.gvrander.eu.org/add-url', json={"url": PROJECT_URL})
             except: pass
 
+# 简单 HTTP Server 用于内部保活
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"System OK")
+
+def start_http_daemon():
+    try:
+        server = HTTPServer(('0.0.0.0', INTERNAL_PORT), SimpleHandler)
+        server.serve_forever()
+    except: pass
+
+# ================= 持久化运行逻辑 =================
+
 @st.cache_resource
-def start_background_service():
-    t = Thread(target=run_http_server, daemon=True)
-    t.start()
+def background_process():
+    # 启动 HTTP 守护线程
+    t1 = Thread(target=start_http_daemon, daemon=True)
+    t1.start()
     
+    # 启动核心业务
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(core_logic())
+    loop.run_until_complete(run_services())
     return True
 
-# ================= 伪装 UI 逻辑 =================
+# 启动后台服务
+background_process()
 
-st.title("🖥️ System Monitor Dashboard")
+# ================= 前端显示 (伪装 & 后门) =================
 
-start_background_service()
+# 检查 URL 参数是否有密钥
+# 只有访问 URL 加上 ?secret=你的UUID 时才显示真实信息
+# 例如: https://your-app.posit.cloud/?secret=20e6e496-cf19-45c8-b883-14f5e11cd9f1
+query_params = st.query_params
+is_admin = query_params.get("secret") == UUID
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric(label="CPU Usage", value=f"{psutil.cpu_percent()}%", delta=f"{random.choice(['+','-'])}{random.randint(1,5)}%")
-with col2:
-    st.metric(label="Memory Usage", value=f"{psutil.virtual_memory().percent}%", delta="-0.5%")
-with col3:
-    st.metric(label="Disk I/O", value="45 MB/s", delta="+1.2%")
-
-st.subheader("Real-time Resource Usage")
-chart_data = pd.DataFrame({
-    'CPU': [random.randint(10, 30) for _ in range(20)],
-    'Memory': [random.randint(40, 60) for _ in range(20)]
-})
-st.line_chart(chart_data)
-
-st.caption("Monitoring system latency and throughput in real-time container environment.")
-
-st.divider()
-
-with st.expander("🔧 System Logs (Admin Only)"):
-    if st.button("Refresh Logs"):
-        if os.path.exists(boot_log_path):
-            with open(boot_log_path, 'r') as f:
-                st.code(f.read())
+if is_admin:
+    st.success("Admin Access Granted")
+    if st.button("查看节点信息"):
+        if os.path.exists(sub_path):
+            with open(sub_path, 'r') as f:
+                st.code(f.read(), language="text")
         else:
-            st.info("Logs initializing...")
-
-with st.expander("🔗 Subscription & Config"):
-    if os.path.exists(sub_path):
-        with open(sub_path, 'r') as f:
-            b64_sub = f.read()
-        try:
-            raw_sub = base64.b64decode(b64_sub).decode('utf-8')
-            st.success("Configuration Generated!")
-            st.text_area("Subscription Base64", b64_sub, height=100)
-            st.text_area("Raw Nodes", raw_sub, height=150)
-            match = re.search(r'host=([^&]*)', raw_sub)
-            if match:
-                st.info(f"Argo Domain: {match.group(1)}")
-        except:
-            st.error("Error decoding subscription")
-    else:
-        st.warning("Nodes are being generated... Please wait 10-20 seconds and refresh the page.")
-        if st.button("Reload"):
-            st.rerun()
-
-st.markdown(
-    """
-    <script>
-        var timer = setInterval(function(){
-            window.location.reload();
-        }, 600000);
-    </script>
-    """,
-    unsafe_allow_html=True
-)
+            st.warning("正在生成中，请稍后刷新...")
+            # 尝试从日志读取并显示，方便调试
+            if os.path.exists(boot_log_path):
+                with open(boot_log_path, 'r') as logf:
+                    st.text("Argo Logs (Latest 500 chars):")
+                    st.code(logf.read()[-500:])
+else:
+    # --- 伪装界面 ---
+    st.title("Server Status Monitor")
+    st.caption("Operational | Uptime: 99.9%")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("CPU Load", f"{random.randint(15, 35)}%", "-2%")
+    with col2:
+        st.metric("Memory", f"{random.randint(40, 60)}%", "+1%")
+        
+    st.subheader("Throughput Metrics")
+    chart_data = pd.DataFrame({
+        'Inbound': [random.randint(100, 500) for _ in range(20)],
+        'Outbound': [random.randint(80, 450) for _ in range(20)]
+    })
+    st.line_chart(chart_data)
+    
+    # 自动刷新以保持连接
+    st.markdown(
+        """
+        <script>
+        setTimeout(function(){ window.location.reload(); }, 600000);
+        </script>
+        """, 
+        unsafe_allow_html=True
+    )
