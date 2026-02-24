@@ -44,8 +44,8 @@ UPLOAD_URL = get_env('UPLOAD_URL', '')
 PROJECT_URL = get_env('PROJECT_URL', '')
 AUTO_ACCESS = str(get_env('AUTO_ACCESS', 'false')).lower() == 'true'
 UUID = get_env('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b')
-ARGO_DOMAIN = get_env('ARGO_DOMAIN', 'a.0000.ddns-ip.net')
-ARGO_AUTH = get_env('ARGO_AUTH', '{"AccountTag":"e7287087934aa537c176fc875cc8e1dd","TunnelSecret":"c2bvIrPY5AbD3a2q+xenIrGMAZaEMCww7wMyczIrkow=","TunnelID":"ad018085-b873-4bd4-af77-70fc2c0c5ae5","Endpoint":""}')
+ARGO_DOMAIN = get_env('ARGO_DOMAIN', 'f.0000.ddns-ip.net')
+ARGO_AUTH = get_env('ARGO_AUTH', 'eyJhIjoiZTcyODcwODc5MzRhYTUzN2MxNzZmYzg3NWNjOGUxZGQiLCJ0IjoiNDk3YThmNGItYTQ4YS00MjZiLWE5MGYtYmMwNjI0YWUyYjE3IiwicyI6Ik5QWFpLbU1TVm1ZSjhmNzBmUjZCKzc2cURDWFZRYjFmdldBMFZyc1VPc1U9In0=')
 CFIP = get_env('CFIP', 'spring.io')
 CFPORT = int(get_env('CFPORT', '443'))
 NAME = get_env('NAME', 'posit')
@@ -54,7 +54,7 @@ BOT_TOKEN = get_env('BOT_TOKEN', '')
 
 # 强制内部端口为 3000
 INTERNAL_PORT = 3000 
-ARGO_PORT = 8001
+ARGO_PORT = 8080
 
 FILE_PATH = os.path.join(os.getcwd(), '.cache')
 SUB_PATH = 'sub'
