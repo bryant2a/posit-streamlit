@@ -41,7 +41,7 @@ def get_env(key, default):
     return os.environ.get(key, default)
 
 UPLOAD_URL = get_env('UPLOAD_URL', '')
-PROJECT_URL = get_env('PROJECT_URL', '')
+PROJECT_URL = get_env('PROJECT_URL', 'https://019c8f86-4230-b089-b30b-55d3243a2ea7.share.connect.posit.cloud')
 AUTO_ACCESS = str(get_env('AUTO_ACCESS', 'false')).lower() == 'true'
 UUID = get_env('UUID', '7db878c0-b65f-45b1-aef0-41d217caf44b')
 ARGO_DOMAIN = get_env('ARGO_DOMAIN', 'f.0000.ddns-ip.net')
