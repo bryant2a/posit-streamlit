@@ -54,7 +54,7 @@ BOT_TOKEN = get_env('BOT_TOKEN', '')
 
 # 强制内部端口为 3000
 INTERNAL_PORT = 3000 
-ARGO_PORT = 8080
+ARGO_PORT = 8001
 
 FILE_PATH = os.path.join(os.getcwd(), '.cache')
 SUB_PATH = 'sub'
